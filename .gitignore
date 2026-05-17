@@ -4,3 +4,7 @@ enhanced_messages.json
 message_timestamps.json
 enhanced_messages.json
 message_timestamps.json
+*.bak
+*.bak2
+enhanced_messages.json
+message_timestamps.json
