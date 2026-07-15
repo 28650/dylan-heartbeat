@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const Fastify = require("fastify");
 const fs = require("fs-extra");
+const path = require("path");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -726,6 +727,32 @@ function normalizeWeatherUnits(value) {
   return String(value || "").trim().toLowerCase() === "fahrenheit" ? "fahrenheit" : "metric";
 }
 
+function diaryDirectoryPath() {
+  const configured = readEnvValueOrDefault("DIARY_DIR", "diary");
+  return path.isAbsolute(configured) ? configured : path.join(process.cwd(), configured);
+}
+
+function readDiaryEntries(limit = 20) {
+  const dir = diaryDirectoryPath();
+  try {
+    if (!fs.existsSync(dir)) return [];
+    // 批注 2026-07-15：管理页只读展示 wake-up 生成的本地日记；
+    // 只读取 DIARY_DIR 下的 .md 文件，避免把任意路径内容暴露到 admin 页面。
+    return fs.readdirSync(dir)
+      .filter(name => /^[^/\\]+\.md$/i.test(name))
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, limit)
+      .map(name => {
+        const filePath = path.join(dir, name);
+        const stat = fs.statSync(filePath);
+        const content = fs.readFileSync(filePath, "utf-8").slice(0, 24000);
+        return { name, updated_at: stat.mtime.toISOString(), content };
+      });
+  } catch (err) {
+    return [{ name: "读取日记失败", updated_at: new Date().toISOString(), content: err.message || String(err) }];
+  }
+}
+
 // ========================
 // HTTP Basic Auth
 // ========================
@@ -774,6 +801,18 @@ app.get("/admin", { preHandler: basicAuth }, async (req, reply) => {
     lon: readEnvValue("WEATHER_LON"),
     units: readEnvValueOrDefault("WEATHER_UNITS", "metric")
   };
+  const diaryEntries = readDiaryEntries(20);
+  const diaryHtml = diaryEntries.length
+    ? diaryEntries.map(entry => `
+      <details class="diary-entry">
+        <summary>
+          <span>${escapeHtml(entry.name)}</span>
+          <em>${escapeHtml(new Date(entry.updated_at).toLocaleString("zh-CN"))}</em>
+        </summary>
+        <pre>${escapeHtml(entry.content)}</pre>
+      </details>
+    `).join("")
+    : `<div class="diary-empty">还没有日记。模型在 wake-up 回复里输出 [DIARY]...[/DIARY] 后会保存到这里。</div>`;
 
   const authToken = Buffer.from(`${process.env.ADMIN_USER}:${process.env.ADMIN_PASSWORD}`).toString("base64");
 
@@ -1114,6 +1153,77 @@ const html = `<!DOCTYPE html>
       border: 1px solid rgba(230, 200, 208, 0.3);
     }
 
+    .diary-box {
+      background: rgba(255, 250, 252, 0.5);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 24px;
+      border: 1px solid rgba(230, 200, 208, 0.3);
+    }
+
+    .diary-box h3 {
+      margin: 0 0 12px 0;
+      font-size: 12px;
+      color: #8a4a58;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .diary-entry {
+      border: 1px solid rgba(220, 180, 190, 0.3);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.58);
+      margin-top: 10px;
+      overflow: hidden;
+    }
+
+    .diary-entry summary {
+      cursor: pointer;
+      padding: 12px 14px;
+      color: #6d5057;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .diary-entry summary span {
+      font-weight: 600;
+    }
+
+    .diary-entry summary em {
+      color: #a88a92;
+      font-style: normal;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .diary-entry pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+      padding: 0 14px 14px;
+      color: #5a4046;
+      font-family: "Noto Serif SC", Georgia, "Times New Roman", serif;
+      font-size: 12px;
+      line-height: 1.8;
+      max-height: 360px;
+      overflow: auto;
+    }
+
+    .diary-empty {
+      color: #9a7a82;
+      font-size: 12px;
+      line-height: 1.7;
+      background: rgba(255, 255, 255, 0.55);
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
     .section-title {
       margin-top: 22px;
       padding-top: 18px;
@@ -1165,6 +1275,11 @@ const html = `<!DOCTYPE html>
     <div class="status">
       <p>Gateway <strong>运行中 (${serverUptime}秒)</strong></p>
       <p>Auto Wakeup <strong>${wakeUpStatus}</strong></p>
+    </div>
+
+    <div class="diary-box">
+      <h3>Wake Diary</h3>
+      ${diaryHtml}
     </div>
 
     <!-- 预设方案 -->
