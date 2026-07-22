@@ -1,0 +1,25 @@
+name: Heartbeat Scheduler
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # 每10分钟触发一次
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install dependencies
+        run: npm install axios
+      - name: Run heartbeat
+        run: node heartbeat.js
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_URL: ${{ secrets.NTFY_URL }}
